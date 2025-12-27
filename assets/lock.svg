@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="160" viewBox="0 0 128 160" xmlns="http://www.w3.org/2000/svg">
+  <g fill="#000000" stroke="none">
+    <!-- Shackle -->
+    <path d="M64 12c-20.435 0-37 16.565-37 37v23h14V49c0-12.703 10.297-23 23-23s23 10.297 23 23v23h14V49c0-20.435-16.565-37-37-37z"/>
+    <!-- Body -->
+    <rect x="20" y="60" rx="10" ry="10" width="88" height="80"/>
+    <!-- Keyhole -->
+    <circle cx="64" cy="96" r="8" fill="#ffffff"/>
+    <path d="M64 104 l10 20 h-20 z" fill="#ffffff"/>
+  </g>
+</svg>

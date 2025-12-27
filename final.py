@@ -13,6 +13,7 @@ class VirtualMemoryAnimation(Scene):
         self.MEMORY_FONT_SIZE = 18
         self.API_FONT_SIZE = 16
         self.REGISTRY_FONT_SIZE = 14
+        self.REGISTRY_HEADER_FONT_SIZE = 12
 
         self.ARROW_WIDTH = 2.2      # толщина линии
         self.ARROW_TIP_LENGTH = 0.18
@@ -94,40 +95,65 @@ mov [rax], 42'''
         os_group.move_to(UP * 2.5)  # Top center
         # Реестр выделенных областей (OS VM Registry)
         registry_rect = Rectangle(width=4.2, height=1.8, color=self.REGISTRY_COLOR, stroke_width=2)
-        registry_title = Text("Реестр виртуальной памяти", font_size=16).next_to(registry_rect, UP, buff=0.1)
-        # Внутренние параметры таблицы
+        registry_title = Text("VAD-дерево процесса (!vad)", font_size=16).next_to(registry_rect, UP, buff=0.1)
+        # Внутренние параметры таблицы (Windows: WinDbg !vad — список VAD)
         self.registry_rect = registry_rect
         inner_pad_x = 0.15
         inner_pad_y = 0.18
         usable_width = registry_rect.width - inner_pad_x * 2
         usable_height = registry_rect.height - inner_pad_y * 2
-        col_fracs = [0.34, 0.43, 0.23]
+        # Колонки: VAD | Level | Start | End | Commit | Type | Protect (7 столбцов), единый размер шрифта
+        # Увеличены Level/Commit/Type/Protect, чтобы избежать авто-скейла текста
+        col_fracs = [0.11, 0.11, 0.14, 0.14, 0.12, 0.16, 0.22]
         self.registry_col_widths = [f * usable_width for f in col_fracs]
         inner_left_x = registry_rect.get_left()[0] + inner_pad_x
         top_inner_y = registry_rect.get_top()[1] - inner_pad_y
+        # Сохраняем для последующего точного центрирования ячеек
+        self.registry_inner_left_x = inner_left_x
         # Вертикальные разделители (грид)
-        x1 = inner_left_x + self.registry_col_widths[0]
-        x2 = inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1]
-        grid_line1 = Line(np.array([x1, registry_rect.get_top()[1]-inner_pad_y, 0]),
-                          np.array([x1, registry_rect.get_bottom()[1]+inner_pad_y, 0]),
-                          stroke_width=1, color=self.REGISTRY_COLOR)
-        grid_line2 = Line(np.array([x2, registry_rect.get_top()[1]-inner_pad_y, 0]),
-                          np.array([x2, registry_rect.get_bottom()[1]+inner_pad_y, 0]),
-                          stroke_width=1, color=self.REGISTRY_COLOR)
+        col_xs = [inner_left_x + sum(self.registry_col_widths[:i+1]) for i in range(len(self.registry_col_widths)-1)]
+        grid_lines = VGroup(*[
+            Line(np.array([x, registry_rect.get_top()[1]-inner_pad_y, 0]),
+                 np.array([x, registry_rect.get_bottom()[1]+inner_pad_y, 0]),
+                 stroke_width=1, color=self.REGISTRY_COLOR)
+            for x in col_xs
+        ])
         # Заголовки колонок (внутри прямоугольника)
+        cumulative = [0]
+        for w in self.registry_col_widths:
+            cumulative.append(cumulative[-1] + w)
+        # Сохраняем кумулятивные ширины для доступа в методах добавления строк
+        self.registry_col_cumulative = cumulative
         self.registry_col_centers = [
-            inner_left_x + self.registry_col_widths[0] * 0.5,
-            inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1] * 0.5,
-            inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1] + self.registry_col_widths[2] * 0.5
+            inner_left_x + (cumulative[i] + cumulative[i+1]) * 0.5
+            for i in range(len(self.registry_col_widths))
         ]
         header_y = top_inner_y - 0.05
-        header_pid = Text("Процесс", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
-        header_range = Text("Диапазон", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
-        header_state = Text("Состояние", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
-        header_pid.move_to(np.array([self.registry_col_centers[0], header_y, 0]))
-        header_range.move_to(np.array([self.registry_col_centers[1], header_y, 0]))
-        header_state.move_to(np.array([self.registry_col_centers[2], header_y, 0]))
-        header_row = VGroup(header_pid, header_range, header_state)
+        h_vad = Text("VAD", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_lvl = Text("Level", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_start = Text("Start", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_end = Text("End", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_commit = Text("Commit", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_type = Text("Type", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        h_prot = Text("Protect", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY, font="Monospace")
+        headers_list = [h_vad, h_lvl, h_start, h_end, h_commit, h_type, h_prot]
+        # Сначала расставляем заголовки по центрам колонок
+        for i, h in enumerate(headers_list):
+            h.move_to(np.array([self.registry_col_centers[i], header_y, 0]))
+        # Единый масштаб для шапки: берём минимальный допустимый scale по всем колонкам
+        header_scales = []
+        for i, h in enumerate(headers_list):
+            max_w = self.registry_col_widths[i] - 0.08
+            s = max_w / h.width if h.width > 0 else 1.0
+            header_scales.append(min(1.0, s))
+        common_header_scale = min(header_scales) if header_scales else 1.0
+        if common_header_scale < 1.0:
+            for h in headers_list:
+                h.scale(common_header_scale)
+            # Перепозиционируем после масштабирования, чтобы остались по центру
+            for i, h in enumerate(headers_list):
+                h.move_to(np.array([self.registry_col_centers[i], header_y, 0]))
+        header_row = VGroup(*headers_list)
         # Нижняя линия под заголовком
         header_line = Line(
             np.array([inner_left_x, header_y - 0.12, 0]),
@@ -136,26 +162,28 @@ mov [rax], 42'''
         )
         # Контейнер строк
         self.registry_rows = VGroup()
-        self.registry_row_height = 0.3
-        self.registry_first_row_y = header_y - 0.32
+        self.registry_row_height = 0.26
+        self.registry_first_row_y = header_y - 0.30
         # Примечание по документации — внутрь блока снизу
-        docs_note = Text(
-            "Windows: VAD | Linux: vm_area_struct | macOS: vm_map_entry",
-            font_size=9, color=GRAY_B
-        )
+        docs_note = Text("WinDbg !vad: VAD, Level, Start, End, Commit, Type, Protect",
+                         font_size=self.REGISTRY_FONT_SIZE, color=GRAY_B, font="Monospace")
+        # Подгон по ширине блока, чтобы длинная подпись гарантированно умещалась
+        max_note_w = usable_width
+        if docs_note.width > max_note_w:
+            docs_note.scale_to_fit_width(max_note_w)
         docs_note.move_to(np.array([registry_rect.get_center()[0], registry_rect.get_bottom()[1] + 0.15, 0]))
         self.docs_note = docs_note
         # Собираем и размещаем ПОД блоком ОС по центру
         self.registry_group = VGroup(
             registry_title,
             registry_rect,
-            grid_line1, grid_line2,
+            grid_lines,
             header_row,
             header_line,
             self.registry_rows,
             docs_note
         )
-        self.registry_group.scale(0.95)
+        self.registry_group.scale(1.1)
         # Фиксируем позицию под ОС по центру сцены (чтобы не налезал)
         self.registry_group.move_to(UP * 0.2)
         os_group.add(self.registry_group)
@@ -251,8 +279,11 @@ mov [rax], 42'''
             y = mid_y + amp * np.sin(2 * PI * freq * t)
             return np.array([x, y, 0])
         wavy_line = ParametricFunction(wavy_func, t_range=[0, 1], color=GRAY_B, stroke_width=2)
+        # Двойная волнистая линия: копия со смещением вверх
+        wavy_line2 = ParametricFunction(wavy_func, t_range=[0, 1], color=GRAY_B, stroke_width=2).shift(UP * 0.04)
         wavy_line.set_z_index(1)
-        self.memory_space_group = VGroup(memory_border, memory_label, wavy_line)
+        wavy_line2.set_z_index(1)
+        self.memory_space_group = VGroup(memory_border, memory_label, wavy_line, wavy_line2)
         
         # 6. Function block (CENTER)
         func_rect = Rectangle(width=1.2, height=0.3, color=BLACK, stroke_width=1)
@@ -288,6 +319,8 @@ mov [rax], 42'''
         self.clock_hand = clock_hand
         self.heap_group = heap_group
         self.code_group = code_group
+        # Настройки завершения процесса: ExitProcess (по умолчанию) или TerminateProcess
+        self.termination_mode = "ExitProcess"  # или "TerminateProcess"
         
         # Animation sequences
         self.show_malloc_sequence()
@@ -401,18 +434,23 @@ mov [rax], 42'''
         # Значок замка рядом с адресом выделенного блока
         allocated_block_group = self.heap_lines[self.allocated_block_index]
         addr_text = allocated_block_group[1]
-        lock_body = Rectangle(width=0.18, height=0.14, fill_color=YELLOW, fill_opacity=1, stroke_color=YELLOW, stroke_width=1)
-        lock_shackle = Arc(radius=0.09, angle=PI, color=YELLOW, stroke_width=2)
-        lock_shackle.shift(UP*0.03)
-        lock_icon = VGroup(lock_shackle, lock_body).scale(0.6)
-        lock_icon.next_to(addr_text, RIGHT, buff=0.18).align_to(addr_text, DOWN)
+        lock_icon = self.load_lock_icon().scale(1.0)
+        lock_icon.next_to(addr_text, RIGHT, buff=0.22).align_to(addr_text, DOWN)
         self.lock_icon = lock_icon
         self.play(FadeIn(self.lock_icon), run_time=0.3)
 
         # Добавляем запись в реестр виртуальной памяти ОС
         start_addr = "0x55a13000"
         end_addr = "0x55a14000"
-        self.add_registry_entry(self.process_pid, start_addr, end_addr, state_text="Зарезервировано")
+        # Добавляем строку VAD (!vad): уровень, старт/энд (VPN), коммит, тип, защита
+        base_int = int(start_addr, 16)
+        end_int = int(end_addr, 16) - 1
+        start_vpn = f"{base_int // 4096:X}".lower()
+        end_vpn = f"{end_int // 4096:X}".lower()
+        # Псевдо-адрес узла VAD для визуализации (детерминированно от адреса)
+        vad_addr = f"{(base_int ^ 0x82741BF8) & 0xFFFFFFFF:X}".lower()
+        self.add_registry_entry_vad(vad_addr=vad_addr, level=2, start_vpn=start_vpn, end_vpn=end_vpn,
+                                    commit_pages=1, type_text="Private", prot_text="EXECUTE_READWRITE")
 
         # --- Вылетающий адрес ----
         allocated_block = self.heap_lines[self.allocated_block_index]
@@ -603,9 +641,45 @@ mov [rax], 42'''
             run_time=1.5
         )
 
+    def load_lock_icon(self):
+        """Пробует загрузить SVG-замок из assets/lock.svg; при ошибке — рисует векторный."""
+        try:
+            from manim import SVGMobject
+            svg = SVGMobject("assets/lock.svg")
+            # покраска и нормализация размера
+            try:
+                svg.set_fill(YELLOW, 1.0)
+                svg.set_stroke(YELLOW, 0)
+            except Exception:
+                for m in svg.submobjects:
+                    try:
+                        m.set_fill(YELLOW, 1.0)
+                        m.set_stroke(YELLOW, 0)
+                    except Exception:
+                        pass
+            target_h = 0.22
+            if getattr(svg, "height", 0) > 0:
+                svg.scale(target_h / svg.height)
+            return svg
+        except Exception:
+            # fallback: простой векторный замок
+            body = RoundedRectangle(corner_radius=0.03, width=0.22, height=0.18,
+                                    stroke_color=YELLOW, stroke_width=1.5, fill_color=YELLOW, fill_opacity=1.0)
+            shackle = Arc(radius=0.11, angle=PI, color=YELLOW, stroke_width=2.2).shift(UP * 0.063)
+            keyhole = VGroup(Circle(radius=0.018, color=BLACK, fill_color=BLACK, fill_opacity=1.0, stroke_width=0),
+                             Triangle(color=BLACK, fill_color=BLACK, fill_opacity=1.0, stroke_width=0).scale(0.07).rotate(PI))
+            keyhole.arrange(DOWN, buff=-0.01).move_to(body.get_center() + DOWN * 0.01)
+            return VGroup(shackle, body, keyhole)
+
     # --- Дополнения: Реестр ОС и освобождение при краше ---
     def add_registry_entry(self, pid_text, start_addr, end_addr, state_text="Зарезервировано"):
-        """Анимированно добавляет строку в реестр виртуальной памяти ОС (внутри таблицы)"""
+        """[Deprecated] Сохранено для совместимости. Делегирует Windows-версии."""
+        size = self._calc_region_size(start_addr, end_addr)
+        self.add_registry_entry_windows(start_addr, size, "MEM_COMMIT", "PAGE_READWRITE", "MEM_PRIVATE")
+
+    def add_registry_entry_windows(self, base_addr: str, region_size_bytes: int,
+                                   state: str, protect: str, mem_type: str):
+        """Добавляет строку в реестр (Windows MEMORY_BASIC_INFORMATION)"""
         reg_rect = self.registry_rect
         reg_high = SurroundingRectangle(reg_rect, color=YELLOW, buff=0.02, stroke_width=3)
         self.play(Create(reg_high), run_time=0.4)
@@ -613,11 +687,13 @@ mov [rax], 42'''
         # Координаты следующей строки
         row_index = len(self.registry_rows)
         row_y = self.registry_first_row_y - self.registry_row_height * row_index
-        # Ячейки
-        pid = Text(pid_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
-        rng = Text(f"[{start_addr} - {end_addr})", font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
-        state = Text(state_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace", color=GREEN_E)
-        cells = [pid, rng, state]
+        # Ячейки: База | Размер | Состояние | Защита | Тип
+        base = Text(base_addr, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        size_cell = Text(f"{region_size_bytes}", font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        state_cell = Text(state, font_size=self.REGISTRY_FONT_SIZE, font="Monospace", color=GREEN_E)
+        prot_cell = Text(protect, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        type_cell = Text(mem_type, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        cells = [base, size_cell, state_cell, prot_cell, type_cell]
         # Подгон по ширине столбцов (чтобы не вылезали)
         for i, cell in enumerate(cells):
             max_w = self.registry_col_widths[i] - 0.08
@@ -632,8 +708,73 @@ mov [rax], 42'''
 
         # для удаления позже
         self.last_registry_row = row
-        self.last_registry_range = (start_addr, end_addr)
-        self.last_registry_state = state
+        self.last_registry_range = (base_addr, base_addr)
+        self.last_registry_state = state_cell
+
+    def _calc_region_size(self, start_addr: str, end_addr: str) -> int:
+        try:
+            return int(end_addr, 16) - int(start_addr, 16)
+        except Exception:
+            return 4096
+
+    def add_registry_entry_vad(self, vad_addr: str, level: int, start_vpn: str, end_vpn: str,
+                               commit_pages: int, type_text: str, prot_text: str):
+        """Добавляет строку в формате WinDbg !vad (7 колонок)"""
+        reg_rect = self.registry_rect
+        reg_high = SurroundingRectangle(reg_rect, color=YELLOW, buff=0.02, stroke_width=3)
+        self.play(Create(reg_high), run_time=0.3)
+
+        row_index = len(self.registry_rows)
+        row_center_y = self.registry_first_row_y - self.registry_row_height * row_index
+
+        # Сокращение адресов: первые 4 символа + многоточие
+        def short_addr(s: str) -> str:
+            return (s[:4] + "…") if len(s) > 4 else s
+
+        vad_cell = Text(short_addr(f"{vad_addr}"), font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        lvl_cell = Text(f"{level}", font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        start_cell = Text(short_addr(f"{start_vpn}"), font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        end_cell = Text(short_addr(f"{end_vpn}"), font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        commit_cell = Text(f"{commit_pages}", font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        type_cell = Text(type_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        prot_cell = Text(prot_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        cells = [vad_cell, lvl_cell, start_cell, end_cell, commit_cell, type_cell, prot_cell]
+        # Единый масштаб для всей строки: вычисляем минимальный scale, чтобы все ячейки влезли
+        scales = []
+        max_h = self.registry_row_height - 0.06
+        for i, cell in enumerate(cells):
+            max_w = self.registry_col_widths[i] - 0.08
+            s_w = max_w / cell.width if cell.width > 0 else 1.0
+            s_h = max_h / cell.height if cell.height > 0 else 1.0
+            scales.append(min(1.0, s_w, s_h))
+        row_scale = min(scales) if scales else 1.0
+        for i, cell in enumerate(cells):
+            if row_scale < 1.0:
+                cell.scale(row_scale)
+            x = self.registry_col_centers[i]
+            if i == 0:
+                x -= 0.12  # VAD адрес левее (усиленное смещение)
+            if i == 6:
+                x += 0.12  # Protect правее (усиленное смещение)
+            cell.move_to(np.array([x, row_center_y, 0]))
+
+        row = VGroup(*cells)
+        self.registry_rows.add(row)
+        # Подсветка добавленной строки жёлтым
+        if hasattr(self, "last_vad_highlight") and self.last_vad_highlight:
+            try:
+                self.play(FadeOut(self.last_vad_highlight), run_time=0.2)
+            except Exception:
+                pass
+        row_highlight = SurroundingRectangle(row, color=YELLOW, buff=0.02, stroke_width=2)
+        self.last_vad_highlight = row_highlight
+        self.play(Write(row), Create(row_highlight), run_time=0.5)
+        self.play(FadeOut(reg_high), run_time=0.2)
+
+        # запоминаем последнюю добавленную строку для удаления при аварии
+        self.last_registry_row = row
+
+        # total vads — не показываем, оставляем статичную подпись
 
     def show_crash_cleanup_sequence(self):
         """Показать, как ОС освобождает ресурсы при аварийном завершении процесса"""
@@ -661,10 +802,15 @@ mov [rax], 42'''
         if fade_list:
             self.play(*[FadeOut(m) for m in fade_list], run_time=0.4)
 
-        # Снять "подсветку" со стека (вернуть нейтральный цвет у ptr)
+        # Вернуть занятое место в стеке к "0x00000000" (строка ptr)
         try:
-            ptr_entry = self.stack_lines[1][2]
-            self.play(ptr_entry.animate.set_color(LIGHT_GRAY), run_time=0.2)
+            ptr_entry_group = self.stack_lines[1]
+            old_ptr_text = ptr_entry_group[2]
+            zero_text = Text("0x00000000", font_size=self.MEMORY_FONT_SIZE-2, font="Monospace", color=LIGHT_GRAY)
+            zero_text.move_to(old_ptr_text.get_center())
+            self.play(Transform(old_ptr_text, zero_text), run_time=0.3)
+            ptr_entry_group.remove(old_ptr_text)
+            ptr_entry_group.add(zero_text)
         except Exception:
             pass
 
@@ -674,7 +820,7 @@ mov [rax], 42'''
         reg_rect = self.registry_rect
         self.play(Indicate(reg_rect, color=YELLOW), run_time=0.6)
 
-        # Обновляем heap-блок: становится свободным
+        # Обновляем heap-блок: становится свободным (освобождение VAD/страниц)
         allocated_block_group = self.heap_lines[self.allocated_block_index]
         old_block_text = allocated_block_group[2]
         freed_text = Text("[занято 0 байт]", font_size=self.MEMORY_FONT_SIZE-2, font="Monospace", color=LIGHT_GRAY)
@@ -694,6 +840,24 @@ mov [rax], 42'''
         # Удаляем запись из реестра
         if hasattr(self, "last_registry_row"):
             self.play(FadeOut(self.last_registry_row), run_time=0.4)
+            try:
+                self.registry_rows.remove(self.last_registry_row)
+            except Exception:
+                pass
 
-        # Завершение уведомления
-        self.play(FadeOut(crash_note), run_time=0.3)
+        # Пошаговые действия по Windows docs (лаконичные подписи)
+        steps = []
+        steps.append(Text("Треды помечены на завершение", font_size=12, color=GRAY_B))
+        if self.termination_mode == "ExitProcess":
+            steps.append(Text("DLL: процесс детачится (ExitProcess)", font_size=12, color=GRAY_B))
+        else:
+            steps.append(Text("DLL: без уведомления (TerminateProcess)", font_size=12, color=GRAY_B))
+        steps.append(Text("Хендлы закрыты; объекты живут, если есть другие ссылки", font_size=12, color=GRAY_B))
+        # Коды выхода
+        exit_code = "0xC0000005"  # фатальное исключение (пример)
+        steps.append(Text(f"Exit code: {exit_code}; процесс сигнализирован", font_size=12, color=GRAY_B))
+        steps_v = VGroup(*steps).arrange(DOWN, aligned_edge=LEFT, buff=0.06)
+        steps_v.next_to(self.os_group, DOWN, buff=0.25).align_to(self.os_group, LEFT)
+        self.play(FadeIn(steps_v), run_time=0.4)
+        self.wait(0.6)
+        self.play(FadeOut(steps_v), FadeOut(crash_note), run_time=0.4)
