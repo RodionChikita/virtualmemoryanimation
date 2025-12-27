@@ -6,11 +6,13 @@ class VirtualMemoryAnimation(Scene):
         # Colors
         self.OS_COLOR = PURPLE
         self.CLOCK_COLOR = WHITE
+        self.REGISTRY_COLOR = TEAL_E
         
         # Font sizes
         self.CODE_FONT_SIZE = 20
         self.MEMORY_FONT_SIZE = 18
         self.API_FONT_SIZE = 16
+        self.REGISTRY_FONT_SIZE = 14
 
         self.ARROW_WIDTH = 2.2      # толщина линии
         self.ARROW_TIP_LENGTH = 0.18
@@ -41,10 +43,15 @@ class VirtualMemoryAnimation(Scene):
         )
         
         code_title = Text("Код программы", font_size=22).next_to(code_block, UP, buff=0.2)
-        code_group.add(code_title, code_block)
+        # Подпись процесса (для связи с реестром ОС)
+        self.process_name = "app.exe"
+        self.process_pid = "PID 1234"
+        pid_label = Text(f"Процесс: {self.process_name} ({self.process_pid})", font_size=16, color=GRAY_B)
+        pid_label.next_to(code_title, UP, buff=0.1)
+        code_group.add(code_title, pid_label, code_block)
         self.add(code_group)   # важно — чтобы Code отрисовался!
         self.wait(0.01) 
-        #code_group.scale(0.7)   # или 0.
+        code_group.scale(0.85)
         code_group.to_edge(LEFT, buff=0.3)
 
 
@@ -85,6 +92,73 @@ mov [rax], 42'''
         
         os_group.add(os_title, os_rect, self.api_texts, clock_group)
         os_group.move_to(UP * 2.5)  # Top center
+        # Реестр выделенных областей (OS VM Registry)
+        registry_rect = Rectangle(width=4.2, height=1.8, color=self.REGISTRY_COLOR, stroke_width=2)
+        registry_title = Text("Реестр виртуальной памяти", font_size=16).next_to(registry_rect, UP, buff=0.1)
+        # Внутренние параметры таблицы
+        self.registry_rect = registry_rect
+        inner_pad_x = 0.15
+        inner_pad_y = 0.18
+        usable_width = registry_rect.width - inner_pad_x * 2
+        usable_height = registry_rect.height - inner_pad_y * 2
+        col_fracs = [0.34, 0.43, 0.23]
+        self.registry_col_widths = [f * usable_width for f in col_fracs]
+        inner_left_x = registry_rect.get_left()[0] + inner_pad_x
+        top_inner_y = registry_rect.get_top()[1] - inner_pad_y
+        # Вертикальные разделители (грид)
+        x1 = inner_left_x + self.registry_col_widths[0]
+        x2 = inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1]
+        grid_line1 = Line(np.array([x1, registry_rect.get_top()[1]-inner_pad_y, 0]),
+                          np.array([x1, registry_rect.get_bottom()[1]+inner_pad_y, 0]),
+                          stroke_width=1, color=self.REGISTRY_COLOR)
+        grid_line2 = Line(np.array([x2, registry_rect.get_top()[1]-inner_pad_y, 0]),
+                          np.array([x2, registry_rect.get_bottom()[1]+inner_pad_y, 0]),
+                          stroke_width=1, color=self.REGISTRY_COLOR)
+        # Заголовки колонок (внутри прямоугольника)
+        self.registry_col_centers = [
+            inner_left_x + self.registry_col_widths[0] * 0.5,
+            inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1] * 0.5,
+            inner_left_x + self.registry_col_widths[0] + self.registry_col_widths[1] + self.registry_col_widths[2] * 0.5
+        ]
+        header_y = top_inner_y - 0.05
+        header_pid = Text("Процесс", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
+        header_range = Text("Диапазон", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
+        header_state = Text("Состояние", font_size=self.REGISTRY_FONT_SIZE, color=LIGHT_GRAY)
+        header_pid.move_to(np.array([self.registry_col_centers[0], header_y, 0]))
+        header_range.move_to(np.array([self.registry_col_centers[1], header_y, 0]))
+        header_state.move_to(np.array([self.registry_col_centers[2], header_y, 0]))
+        header_row = VGroup(header_pid, header_range, header_state)
+        # Нижняя линия под заголовком
+        header_line = Line(
+            np.array([inner_left_x, header_y - 0.12, 0]),
+            np.array([inner_left_x + usable_width, header_y - 0.12, 0]),
+            stroke_width=1, color=self.REGISTRY_COLOR
+        )
+        # Контейнер строк
+        self.registry_rows = VGroup()
+        self.registry_row_height = 0.3
+        self.registry_first_row_y = header_y - 0.32
+        # Примечание по документации — внутрь блока снизу
+        docs_note = Text(
+            "Windows: VAD | Linux: vm_area_struct | macOS: vm_map_entry",
+            font_size=9, color=GRAY_B
+        )
+        docs_note.move_to(np.array([registry_rect.get_center()[0], registry_rect.get_bottom()[1] + 0.15, 0]))
+        self.docs_note = docs_note
+        # Собираем и размещаем ПОД блоком ОС по центру
+        self.registry_group = VGroup(
+            registry_title,
+            registry_rect,
+            grid_line1, grid_line2,
+            header_row,
+            header_line,
+            self.registry_rows,
+            docs_note
+        )
+        self.registry_group.scale(0.95)
+        # Фиксируем позицию под ОС по центру сцены (чтобы не налезал)
+        self.registry_group.move_to(UP * 0.2)
+        os_group.add(self.registry_group)
         
         # 4. Stack Memory (TOP RIGHT)
         stack_rect = Rectangle(width=4.5, height=2.75, color=BLUE, stroke_width=2)
@@ -117,12 +191,17 @@ mov [rax], 42'''
         
         stack_group.add(stack_title, stack_rect, self.stack_lines)
         stack_group.move_to(RIGHT * 4.7 + UP * 1.8)
+        # Сохраняем ссылки на прямоугольник стека для вычислений границ
+        self.stack_rect = stack_rect
         
         # 5. Heap Memory (BOTTOM RIGHT)
         heap_rect = Rectangle(width=4.5, height=2.75, color=GREEN, stroke_width=2)
         heap_title = Text("Динамическая память", font_size=20).next_to(heap_rect, UP, buff=0.2)
         page_info = Text("Размер страницы: 4096 байт", font_size=12, color=GRAY)
-        page_info.next_to(heap_title, UP, buff=0.1)
+        page_info.next_to(heap_title, UP, buff=0.25)
+        # Чуть опустить подписи, чтобы освободить место для волнистой линии
+        heap_title.shift(DOWN * 0.15)
+        page_info.shift(DOWN * 0.3)
         
         heap_data = [
             ("0x55a11000", "[занято 2048 байт]"),
@@ -152,6 +231,28 @@ mov [rax], 42'''
         
         heap_group.add(heap_title, heap_rect, self.heap_lines, page_info)
         heap_group.move_to(RIGHT * 4.7 + DOWN * 1.8)
+        # Сохраняем ссылки на прямоугольник кучи для вычислений границ
+        self.heap_rect = heap_rect
+
+        # 5.1 Общая рамка вокруг стека и кучи + подпись и волнистая граница
+        stack_heap_group_for_border = VGroup(stack_group, heap_group)
+        memory_border = SurroundingRectangle(stack_heap_group_for_border, buff=0.35, color=GRAY_B, stroke_width=2)
+        memory_border.shift(RIGHT * 0.25)
+        memory_border.set_z_index(-1)
+        memory_label = Text("Располагаемая память", font_size=16, color=GRAY_B).next_to(memory_border, UP, buff=0.12)
+        # Волнистая линия между стеком и кучей (показывает, что это части общего пространства)
+        left_x = memory_border.get_left()[0] + 0.02
+        right_x = memory_border.get_right()[0] - 0.02
+        mid_y = (self.stack_rect.get_bottom()[1] + self.heap_rect.get_top()[1]) / 2 + 0.12
+        amp = 0.06
+        freq = 5
+        def wavy_func(t):
+            x = left_x + (right_x - left_x) * t
+            y = mid_y + amp * np.sin(2 * PI * freq * t)
+            return np.array([x, y, 0])
+        wavy_line = ParametricFunction(wavy_func, t_range=[0, 1], color=GRAY_B, stroke_width=2)
+        wavy_line.set_z_index(1)
+        self.memory_space_group = VGroup(memory_border, memory_label, wavy_line)
         
         # 6. Function block (CENTER)
         func_rect = Rectangle(width=1.2, height=0.3, color=BLACK, stroke_width=1)
@@ -167,6 +268,7 @@ mov [rax], 42'''
             LaggedStart(
                 Create(code_group),
                 Create(os_group),
+                Create(self.memory_space_group),
                 Create(stack_group),
                 Create(heap_group),
                 Create(self.dasm_group),
@@ -176,6 +278,8 @@ mov [rax], 42'''
         )
         
         self.wait(1)
+        # Доп. фиксация позиции реестра ниже ОС после появления всех элементов
+        self.registry_group.move_to(UP * 0.2)
         
         # Store references for animation sequences
         self.code_block = code_block
@@ -183,10 +287,12 @@ mov [rax], 42'''
         self.os_group = os_group
         self.clock_hand = clock_hand
         self.heap_group = heap_group
+        self.code_group = code_group
         
         # Animation sequences
         self.show_malloc_sequence()
         self.show_assignment_sequence()
+        self.show_crash_cleanup_sequence()
     
     def show_malloc_sequence(self):
         API_HIGHLIGHT = YELLOW
@@ -291,6 +397,22 @@ mov [rax], 42'''
                 self.reserved_group = reserved_group
                 self.allocated_block_index = block_idx
                 self.wait(1)
+
+        # Значок замка рядом с адресом выделенного блока
+        allocated_block_group = self.heap_lines[self.allocated_block_index]
+        addr_text = allocated_block_group[1]
+        lock_body = Rectangle(width=0.18, height=0.14, fill_color=YELLOW, fill_opacity=1, stroke_color=YELLOW, stroke_width=1)
+        lock_shackle = Arc(radius=0.09, angle=PI, color=YELLOW, stroke_width=2)
+        lock_shackle.shift(UP*0.03)
+        lock_icon = VGroup(lock_shackle, lock_body).scale(0.6)
+        lock_icon.next_to(addr_text, RIGHT, buff=0.18).align_to(addr_text, DOWN)
+        self.lock_icon = lock_icon
+        self.play(FadeIn(self.lock_icon), run_time=0.3)
+
+        # Добавляем запись в реестр виртуальной памяти ОС
+        start_addr = "0x55a13000"
+        end_addr = "0x55a14000"
+        self.add_registry_entry(self.process_pid, start_addr, end_addr, state_text="Зарезервировано")
 
         # --- Вылетающий адрес ----
         allocated_block = self.heap_lines[self.allocated_block_index]
@@ -480,3 +602,98 @@ mov [rax], 42'''
             ),
             run_time=1.5
         )
+
+    # --- Дополнения: Реестр ОС и освобождение при краше ---
+    def add_registry_entry(self, pid_text, start_addr, end_addr, state_text="Зарезервировано"):
+        """Анимированно добавляет строку в реестр виртуальной памяти ОС (внутри таблицы)"""
+        reg_rect = self.registry_rect
+        reg_high = SurroundingRectangle(reg_rect, color=YELLOW, buff=0.02, stroke_width=3)
+        self.play(Create(reg_high), run_time=0.4)
+
+        # Координаты следующей строки
+        row_index = len(self.registry_rows)
+        row_y = self.registry_first_row_y - self.registry_row_height * row_index
+        # Ячейки
+        pid = Text(pid_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        rng = Text(f"[{start_addr} - {end_addr})", font_size=self.REGISTRY_FONT_SIZE, font="Monospace")
+        state = Text(state_text, font_size=self.REGISTRY_FONT_SIZE, font="Monospace", color=GREEN_E)
+        cells = [pid, rng, state]
+        # Подгон по ширине столбцов (чтобы не вылезали)
+        for i, cell in enumerate(cells):
+            max_w = self.registry_col_widths[i] - 0.08
+            if cell.width > max_w:
+                cell.scale_to_fit_width(max_w)
+            cell.move_to(np.array([self.registry_col_centers[i], row_y, 0]))
+
+        row = VGroup(*cells)
+        self.registry_rows.add(row)
+        self.play(Write(row), run_time=0.6)
+        self.play(FadeOut(reg_high), run_time=0.2)
+
+        # для удаления позже
+        self.last_registry_row = row
+        self.last_registry_range = (start_addr, end_addr)
+        self.last_registry_state = state
+
+    def show_crash_cleanup_sequence(self):
+        """Показать, как ОС освобождает ресурсы при аварийном завершении процесса"""
+        self.wait(0.8)
+        # Симулируем аварийное завершение: процесс исчезает
+        crash_note_bg = Rectangle(width=4.5, height=0.5, fill_color=BLACK, fill_opacity=0.9, stroke_color=RED, stroke_width=1)
+        crash_note_text = Text("Процесс аварийно завершился", font_size=16, color=RED)
+        crash_note = VGroup(crash_note_bg, crash_note_text)
+        crash_note.next_to(self.code_group, DOWN, buff=0.2).align_to(self.code_group, LEFT)
+
+        self.play(Create(crash_note), run_time=0.5)
+
+        # Очистка лишних стрелок и подсветок перед удалением процесса
+        # - стрелки (Arrow)
+        arrows_to_remove = [m for m in self.mobjects if isinstance(m, Arrow)]
+        # - подсветки (SurroundingRectangle)
+        sr_to_remove = [m for m in self.mobjects if m.__class__.__name__ == "SurroundingRectangle"]
+        fade_list = []
+        if hasattr(self, "current_highlight"):
+            fade_list.append(self.current_highlight)
+        if hasattr(self, "old_heap_high"):
+            fade_list.append(self.old_heap_high)
+        fade_list.extend(arrows_to_remove)
+        fade_list.extend(sr_to_remove)
+        if fade_list:
+            self.play(*[FadeOut(m) for m in fade_list], run_time=0.4)
+
+        # Снять "подсветку" со стека (вернуть нейтральный цвет у ptr)
+        try:
+            ptr_entry = self.stack_lines[1][2]
+            self.play(ptr_entry.animate.set_color(LIGHT_GRAY), run_time=0.2)
+        except Exception:
+            pass
+
+        self.play(FadeOut(self.code_group), FadeOut(self.dasm_group), run_time=0.9)
+
+        # ОС обращается к реестру (краткая индикация без стрелок и лишних подсветок)
+        reg_rect = self.registry_rect
+        self.play(Indicate(reg_rect, color=YELLOW), run_time=0.6)
+
+        # Обновляем heap-блок: становится свободным
+        allocated_block_group = self.heap_lines[self.allocated_block_index]
+        old_block_text = allocated_block_group[2]
+        freed_text = Text("[занято 0 байт]", font_size=self.MEMORY_FONT_SIZE-2, font="Monospace", color=LIGHT_GRAY)
+        freed_text.move_to(old_block_text.get_center())
+        self.play(Transform(old_block_text, freed_text), run_time=0.7)
+        allocated_block_group.remove(old_block_text)
+        allocated_block_group.add(freed_text)
+
+        # Убираем метки выделения
+        if hasattr(self, "reserved_group"):
+            self.play(FadeOut(self.reserved_group), run_time=0.3)
+        if hasattr(self, "allocated_block_rect"):
+            self.play(FadeOut(self.allocated_block_rect), run_time=0.3)
+        if hasattr(self, "lock_icon"):
+            self.play(FadeOut(self.lock_icon), run_time=0.3)
+
+        # Удаляем запись из реестра
+        if hasattr(self, "last_registry_row"):
+            self.play(FadeOut(self.last_registry_row), run_time=0.4)
+
+        # Завершение уведомления
+        self.play(FadeOut(crash_note), run_time=0.3)
